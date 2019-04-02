@@ -10,19 +10,45 @@ import UIKit
 import QuartzCore
 import SceneKit
 import CoreMotion
+import AVFoundation
 
 class GameViewController : UIViewController {
 	var scene : SCNScene!
 	var cameraNode : SCNNode!
 	var floorNode : SCNNode!
 	var motionManager : CMMotionManager!
+    var engine : AVAudioEngine!
+
 	
 	override func viewDidLoad() {
 		super.viewDidLoad()
-		
+        
+        // Audio engine
+        engine = AVAudioEngine()
+        do {
+            try AVAudioSession.sharedInstance().setCategory(AVAudioSession.Category.playAndRecord, mode: .default)
+            let ioBufferDuration = 128.0 / 44100.0
+            try AVAudioSession.sharedInstance().setPreferredIOBufferDuration(ioBufferDuration)
+            
+        } catch {
+            
+            assertionFailure("AVAudioSession setup error: \(error)")
+        }
+        
+        let input = engine.inputNode
+        let format = input.inputFormat(forBus: 0)
+        print (format)
+        engine.connect(input, to: engine.mainMixerNode, format: format)
+
+        assert(engine.inputNode != nil)
+        
+        try! engine.start()
+        
+        
 		// Setup scene
 		scene = SCNScene()
 		scene.physicsWorld.speed = 3
+    
 
 		// Setup camera
 		cameraNode = SCNNode()
@@ -37,14 +63,14 @@ class GameViewController : UIViewController {
 		setupFloor()
 
 		// Add first marble
-		addMarbleAtAltitude(2)
+		addMarbleAtAltitude(11)
 
 		// Setup view
 		let view = self.view as! SCNView
 		view.scene = scene
 
 		// Detect taps
-		let tapRecognizer = UITapGestureRecognizer(target: self, action: #selector(GameViewController.handleTap(_:)))
+		let tapRecognizer = UITapGestureRecognizer(target: self, action: #selector(GameViewController.handleTap(rec:)))
 		view.gestureRecognizers = [tapRecognizer]
 
 		// Detect motion
@@ -60,6 +86,8 @@ class GameViewController : UIViewController {
 
 			self.scene.physicsWorld.gravity = SCNVector3(x: accelX, y: accelY, z: accelZ)
 		}
+        
+ 
 	}
 	
 	func setupLights() {
@@ -102,9 +130,17 @@ class GameViewController : UIViewController {
 		let radius = Float(1.0)
 		let textureNames = ["orange", "blue", "red"]
 		let textureName = textureNames[Int(arc4random()) % textureNames.count]
-		
+        let sounds = ["500Hz_dBFS.wav", "1000Hz_dBFS.wav", "2000Hz_dBFS.wav"]
+
 		let marbleMaterial = SCNMaterial()
-		marbleMaterial.diffuse.contents = UIImage(named: textureName)
+        let marbleAudio = SCNAudioSource(fileNamed: sounds.randomElement() ?? "500Hz_dBFS.wav")!
+        marbleAudio.loops = true
+        marbleAudio.isPositional = true
+        marbleAudio.volume = 1.0
+        marbleAudio.shouldStream =  false
+        marbleAudio.load()
+		
+        marbleMaterial.diffuse.contents = UIImage(named: textureName)
 		marbleMaterial.specular.contents = UIColor.white
 		
 		let marbleGeometry = SCNSphere(radius: CGFloat(radius))
@@ -114,11 +150,28 @@ class GameViewController : UIViewController {
 		marble.geometry?.materials = [marbleMaterial];
 		marble.physicsBody = SCNPhysicsBody.dynamic()
 		marble.position = SCNVector3(x: Float(arc4random()) / (Float(UINT32_MAX) * 10), y: altitude + radius, z: 0)
-		
-		scene.rootNode.addChildNode(marble)
+		marble.addAudioPlayer(SCNAudioPlayer(source: marbleAudio))
+        marble.runAction(SCNAction.playAudio(marbleAudio, waitForCompletion: true))
+ 
+        scene.rootNode.addChildNode(marble)
+ 
 	}
 
-	@objc func handleTap(_ sender: AnyObject) {
-		addMarbleAtAltitude(10)
+	@objc func handleTap(rec: UITapGestureRecognizer) {
+        let scnVew  = self.view as! SCNView
+        if rec.state == .ended {
+            let location: CGPoint = rec.location(in: scnVew)
+            let hits = scnVew.hitTest(location, options:nil)
+            if !hits.isEmpty{
+                let tappedNode = hits.first?.node
+                
+                tappedNode!.removeFromParentNode()
+                print ("hit", location, tappedNode!.geometry?.name)
+            }else{
+                addMarbleAtAltitude(10)
+            }
+        }
 	}
+    
+    
 }
